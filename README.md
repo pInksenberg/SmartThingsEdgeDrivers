@@ -1,5 +1,5 @@
 # SmartThingsEdgeDrivers
-
+11
 ## What is SmartThings Edge?
 
 SmartThings Edge is our new architecture for Hub Connected devices that uses Device Drivers to execute commands locally on SmartThings Hubs. Edge Drivers are [Lua©-based](https://www.lua.org/) and can be used for Hub Connected devices, including Zigbee, Z-Wave, and LAN protocols. Read more about SmartThings Edge in our [public announcement](https://developer.samsung.com/smartthings/blog/en-us/2021/08/19/new-smartthings-edge-for-devices-and-automations?mc_cid=aac4089a1b&mc_eid=c15e37816a).
