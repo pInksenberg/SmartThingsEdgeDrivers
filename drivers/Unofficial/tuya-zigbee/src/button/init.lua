@@ -39,12 +39,6 @@ local function added_handler(self, device)
   device:emit_event(capabilities.button.button.pushed({state_change = false}))
 end
 
-local function button_handler(event)
-  return function(driver, device, value, zb_rx)
-    device:emit_event(event)
-  end
-end
-
 local tuya_private_cluster_button_handler = function(driver, device, zb_rx)
   local event
   local additional_fields = {
