@@ -11,7 +11,7 @@ local AnalogOutput = clusters.AnalogOutput
 local Groups = clusters.Groups
 
 local deviceInitialization = capabilities["stse.deviceInitialization"]
-local reverseCurtainDirection = capabilities["stse.reverseCurtainDirection"]
+local reverseCurtainDirection = "stse.reverseCurtainDirection"
 local softTouch = capabilities["stse.softTouch"]
 local setInitializedStateCommandName = "setInitializedState"
 
@@ -133,12 +133,12 @@ end
 
 local function device_info_changed(driver, device, event, args)
   if device.preferences ~= nil then
-    local reverseCurtainDirectionPrefValue = device.preferences[reverseCurtainDirection.ID]
+    local reverseCurtainDirectionPrefValue = device.preferences[reverseCurtainDirection]
     local softTouchPrefValue = device.preferences[softTouch.ID]
 
     -- reverse direction
     if reverseCurtainDirectionPrefValue ~= nil and
-        reverseCurtainDirectionPrefValue ~= args.old_st_store.preferences[reverseCurtainDirection.ID] then
+        reverseCurtainDirectionPrefValue ~= args.old_st_store.preferences[reverseCurtainDirection] then
       local raw_value = reverseCurtainDirectionPrefValue and aqara_utils.PREF_REVERSE_ON or aqara_utils.PREF_REVERSE_OFF
       device:send(cluster_base.write_manufacturer_specific_attribute(device, Basic.ID, aqara_utils.PREF_ATTRIBUTE_ID,
         aqara_utils.MFG_CODE, data_types.CharString, raw_value))

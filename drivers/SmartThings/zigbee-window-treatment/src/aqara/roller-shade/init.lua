@@ -10,7 +10,7 @@ local Basic = clusters.Basic
 local WindowCovering = clusters.WindowCovering
 
 local initializedStateWithGuide = capabilities["stse.initializedStateWithGuide"]
-local reverseRollerShadeDir = capabilities["stse.reverseRollerShadeDir"]
+local reverseRollerShadeDir = "stse.reverseRollerShadeDir"
 local shadeRotateState = capabilities["stse.shadeRotateState"]
 local setRotateStateCommandName = "setRotateState"
 

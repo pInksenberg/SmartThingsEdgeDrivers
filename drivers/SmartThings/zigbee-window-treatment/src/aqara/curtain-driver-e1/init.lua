@@ -29,7 +29,7 @@ local PRIVATE_CURTAIN_LOCKING_SETTING_ATTRIBUTE_ID = 0x0427
 local PRIVATE_CURTAIN_LOCKING_STATUS_ATTRIBUTE_ID = 0x0428
 
 local initializedStateWithGuide = capabilities["stse.initializedStateWithGuide"]
-local reverseCurtainDirection = capabilities["stse.reverseCurtainDirection"]
+local reverseCurtainDirection = "stse.reverseCurtainDirection"
 local hookLockState = capabilities["stse.hookLockState"]
 local chargingState = capabilities["stse.chargingState"]
 local softTouch = capabilities["stse.softTouch"]
