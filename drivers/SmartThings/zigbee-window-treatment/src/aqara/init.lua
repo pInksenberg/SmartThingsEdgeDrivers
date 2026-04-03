@@ -8,6 +8,7 @@ local cluster_base = require "st.zigbee.cluster_base"
 local data_types = require "st.zigbee.data_types"
 local aqara_utils = require "aqara/aqara_utils"
 local window_treatment_utils = require "window_treatment_utils"
+local utils = require "st.utils"
 
 local Basic = clusters.Basic
 local WindowCovering = clusters.WindowCovering
@@ -24,6 +25,9 @@ local INIT_STATE_INIT = "init"
 local INIT_STATE_OPEN = "open"
 local INIT_STATE_CLOSE = "close"
 local INIT_STATE_REVERSE = "reverse"
+local LATEST_TARGET_LEVEL = "latest_target_level"
+local TARGET_LEVEL_TIME_OUT = "_target_level_timeout"
+local TARGET_LEVEL_TIME_OUT_SECONDS = 30
 
 local PREF_INITIALIZE = "\x00\x01\x00\x00\x00\x00\x00"
 local PREF_SOFT_TOUCH_OFF = "\x00\x08\x00\x00\x00\x01\x00"
@@ -35,6 +39,44 @@ local APPLICATION_VERSION = "application_version"
 
 local function window_shade_level_cmd(driver, device, command)
   aqara_utils.shade_level_cmd(driver, device, command)
+end
+
+local function window_shade_step_level_cmd(driver, device, command)
+  local step = command.args.stepSize
+  
+  -- Priority: use target_level if exists, otherwise use latest state
+  local latest_target_level = device:get_field(LATEST_TARGET_LEVEL)
+  local current_level = latest_target_level or 
+    device:get_latest_state("main", capabilities.windowShadeLevel.ID, capabilities.windowShadeLevel.shadeLevel.NAME) or 0
+  
+  local target_level = current_level + step
+  if target_level > 100 then
+    target_level = 100
+  elseif target_level < 0 then
+    target_level = 0
+  end
+  target_level = utils.round(target_level)
+  
+  -- Set target_level for tracking
+  device:set_field(LATEST_TARGET_LEVEL, target_level)
+  
+  -- Cancel previous timeout timer if exists
+  local old_timer = device:get_field(TARGET_LEVEL_TIME_OUT)
+  if old_timer ~= nil then
+    device.thread:cancel_timer(old_timer)
+  end
+  
+  -- Set 30 second timeout timer to ensure target_level is cleared
+  local timer = device.thread:call_with_delay(TARGET_LEVEL_TIME_OUT_SECONDS, function(d)
+    device:set_field(LATEST_TARGET_LEVEL, nil)
+    device:set_field(TARGET_LEVEL_TIME_OUT, nil)
+  end)
+  device:set_field(TARGET_LEVEL_TIME_OUT, timer)
+  
+  -- Don't emit to cloud, let device reports drive UI
+  -- device:emit_event(capabilities.windowShadeLevel.shadeLevel(target_level))
+  
+  device:send_to_component(command.component, WindowCovering.server.commands.GoToLiftPercentage(device, target_level))
 end
 
 local function set_initialized_state_handler(driver, device, command)
@@ -61,12 +103,45 @@ local function set_initialized_state_handler(driver, device, command)
 end
 
 local function shade_level_report_legacy_handler(driver, device, value, zb_rx)
+  local reported_level = value.value
+  local latest_target_level = device:get_field(LATEST_TARGET_LEVEL)
+  
+  if latest_target_level then
+    -- Active step control
+    if utils.round(reported_level) == utils.round(latest_target_level) then
+      -- Device reached target position, clear target marker and timeout timer
+      device:set_field(LATEST_TARGET_LEVEL, nil)
+      local timer = device:get_field(TARGET_LEVEL_TIME_OUT)
+      if timer ~= nil then
+        device.thread:cancel_timer(timer)
+        device:set_field(TARGET_LEVEL_TIME_OUT, nil)
+      end
+    end
+    -- Always emit to update UI with actual device position
+  end
+  
   -- for version 34
   aqara_utils.emit_shade_level_event(device, value)
   aqara_utils.emit_shade_event(device, value)
 end
 
 local function shade_level_report_handler(driver, device, value, zb_rx)
+  local reported_level = value.value
+  local latest_target_level = device:get_field(LATEST_TARGET_LEVEL)
+  
+  if latest_target_level then
+    -- Active step control
+    if utils.round(reported_level) == utils.round(latest_target_level) then
+      -- Device reached target position, clear target marker and timeout timer
+      device:set_field(LATEST_TARGET_LEVEL, nil)
+      local timer = device:get_field(TARGET_LEVEL_TIME_OUT)
+      if timer ~= nil then
+        device.thread:cancel_timer(timer)
+        device:set_field(TARGET_LEVEL_TIME_OUT, nil)
+      end
+    end
+    -- Always emit to update UI with actual device position
+  end
   aqara_utils.emit_shade_level_event(device, value)
   aqara_utils.emit_shade_event(device, value)
 end
@@ -190,6 +265,9 @@ local aqara_window_treatment_handler = {
     },
     [capabilities.refresh.ID] = {
       [capabilities.refresh.commands.refresh.NAME] = do_refresh
+    },
+    [capabilities.statelessSwitchLevelStep.ID] = {
+      [capabilities.statelessSwitchLevelStep.commands.stepLevel.NAME] = window_shade_step_level_cmd
     }
   },
   zigbee_handlers = {
