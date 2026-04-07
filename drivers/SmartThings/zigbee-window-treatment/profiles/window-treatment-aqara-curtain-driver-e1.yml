@@ -14,6 +14,8 @@ components:
         version: 1
       - id: stse.chargingState
         version: 1
+      - id: statelessSwitchLevelStep
+        version: 1  
       - id: firmwareUpdate
         version: 1
       - id: refresh

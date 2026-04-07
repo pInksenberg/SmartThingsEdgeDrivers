@@ -22,6 +22,9 @@ local packet_id = 0
 
 local PRESET_LEVEL = 50
 local PRESET_LEVEL_KEY = "_presetLevel"
+local LATEST_TARGET_LEVEL = "_latestTargetLevel"
+local TARGET_LEVEL_TIME_OUT = "_targetLevelTimeout"
+local TARGET_LEVEL_TIME_OUT_SECONDS = 30
 
 local FINGERPRINTS = {
   { mfr = "_TZE284_nladmfvf", model = "TS0601"}
@@ -88,23 +91,27 @@ local function device_info_changed(driver, device, event, args)
 end
 
 local function window_shade_open(driver, device)
+  device:set_field(LATEST_TARGET_LEVEL, nil)
   tuya_utils.send_tuya_command(device, '\x01', tuya_utils.DP_TYPE_ENUM, '\x00', packet_id)
   packet_id = increase_packet_id(packet_id)
   device:emit_event(capabilities.windowShade.windowShade.opening())
 end
 
 local function window_shade_close(driver, device)
+  device:set_field(LATEST_TARGET_LEVEL, nil)
   tuya_utils.send_tuya_command(device, '\x01', tuya_utils.DP_TYPE_ENUM, '\x02', packet_id)
   packet_id = increase_packet_id(packet_id)
   device:emit_event(capabilities.windowShade.windowShade.closing())
 end
 
 local function window_shade_pause(driver, device)
+  device:set_field(LATEST_TARGET_LEVEL, nil)
   tuya_utils.send_tuya_command(device, '\x01', tuya_utils.DP_TYPE_ENUM, '\x01', packet_id)
   packet_id = increase_packet_id(packet_id)
 end
 
 local function window_shade_level(driver, device, command)
+  device:set_field(LATEST_TARGET_LEVEL, nil)
   local level = command.args.shadeLevel
   if level > 100 then
     level = 100
@@ -118,6 +125,7 @@ local function window_shade_level(driver, device, command)
 end
 
 local function window_shade_preset(driver, device)
+  device:set_field(LATEST_TARGET_LEVEL, nil)
   local level = device:get_latest_state("main", "windowShadePreset", "position") or
     device:get_field(PRESET_LEVEL_KEY) or
     (device.preferences ~= nil and device.preferences.presetPosition) or
@@ -127,6 +135,7 @@ local function window_shade_preset(driver, device)
 end
 
 local function set_preset_position_cmd(driver, device, command)
+  device:set_field(LATEST_TARGET_LEVEL, nil)
   device:emit_component_event({id = command.component}, capabilities.windowShadePreset.position(command.args.position))
   device:set_field(PRESET_LEVEL_KEY, command.args.position, {persist = true})
 end
@@ -137,7 +146,23 @@ local function tuya_cluster_handler(driver, device, zb_rx)
   -- dp means data point in tuya payload format
   local dp = raw:byte(3)
   local dp_data = raw:byte(10)
-  if dp == 0x03  then
+  if dp == 0x03  then    
+    -- Step control logic
+    local target_level_field = device:get_field(LATEST_TARGET_LEVEL)
+    if target_level_field then
+      -- Allow ±1 degree tolerance for reaching target
+      if math.abs(target_level_field - dp_data) <= 1 then
+        -- Device reached target position, clear target marker and timeout timer
+        device:set_field(LATEST_TARGET_LEVEL, nil)
+        local timer = device:get_field(TARGET_LEVEL_TIME_OUT)
+        if timer ~= nil then
+          device.thread:cancel_timer(timer)
+          device:set_field(TARGET_LEVEL_TIME_OUT, nil)
+        end
+      end
+    end
+    
+    -- Emit events with device-reported level (dp_data)
     window_shade_level_event = capabilities.windowShadeLevel.shadeLevel(dp_data)
     if dp_data == 0 then
       window_shade_val_event = capabilities.windowShade.windowShade("open")
@@ -151,6 +176,45 @@ local function tuya_cluster_handler(driver, device, zb_rx)
     device:emit_event(window_shade_level_event)
     device:emit_event(window_shade_val_event)
   end
+end
+
+local function window_shade_step_level_cmd(driver, device, command)
+  local step = command.args.stepSize
+  
+  -- Priority: use target_level if exists, otherwise use latest state
+  local target_level_field = device:get_field(LATEST_TARGET_LEVEL)
+  local current_level = target_level_field or 
+    device:get_latest_state("main", capabilities.windowShadeLevel.ID, 
+      capabilities.windowShadeLevel.shadeLevel.NAME) or 0
+  
+  -- Calculate new target (user level: 0-100, 0=closed, 100=open)
+  local target_level = current_level + step
+  if target_level > 100 then target_level = 100
+  elseif target_level < 0 then target_level = 0
+  end
+  target_level = utils.round(target_level)
+  
+  -- Update tracking state
+  device:set_field(LATEST_TARGET_LEVEL, target_level)
+  
+  -- Cancel previous timeout timer if exists
+  local old_timer = device:get_field(TARGET_LEVEL_TIME_OUT)
+  if old_timer ~= nil then
+    device.thread:cancel_timer(old_timer)
+  end
+  
+  -- Set 30 second timeout timer to ensure target_level is cleared
+  local timer = device.thread:call_with_delay(TARGET_LEVEL_TIME_OUT_SECONDS, function(d)
+    device:set_field(LATEST_TARGET_LEVEL, nil)
+    device:set_field(TARGET_LEVEL_TIME_OUT, nil)
+  end)
+  device:set_field(TARGET_LEVEL_TIME_OUT, timer)
+  
+  -- Tuya uses inverted logic
+  target_level = utils.round(100 - target_level)
+  
+  tuya_utils.send_tuya_command(device, '\x02', tuya_utils.DP_TYPE_VALUE, '\x00\x00'..string.pack(">I2", target_level), packet_id)
+  packet_id = increase_packet_id(packet_id)
 end
 
 local tuya_curtain_driver = {
@@ -173,6 +237,9 @@ local tuya_curtain_driver = {
     [capabilities.windowShadePreset.ID] = {
       [capabilities.windowShadePreset.commands.presetPosition.NAME] = window_shade_preset,
       [capabilities.windowShadePreset.commands.setPresetPosition.NAME] = set_preset_position_cmd
+    },
+    [capabilities.statelessSwitchLevelStep.ID] = {
+      [capabilities.statelessSwitchLevelStep.commands.stepLevel.NAME] = window_shade_step_level_cmd
     }
   },
   zigbee_handlers = {
